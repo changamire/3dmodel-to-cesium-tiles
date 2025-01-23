@@ -1,8 +1,8 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createReadStream, readdirSync, statSync, createWriteStream } from "fs";
-
-const path = require("path");
-const fetch = require("node-fetch");
+import * as path from "path";
+import fetch from "node-fetch";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 const cesiumUrl = "https://api.cesium.com/v1";
 const authToken = process.env.CESIUM_AUTH_TOKEN;
@@ -25,13 +25,9 @@ const createNewAssetHandler = async (event: CesiumAsset) => {
     name: event.name,
     description: event.description,
     type: event.type,
-    options: {
-      sourceType: event.options.sourceType,
-      geometryCompression: event.options.geometryCompression,
-    },
+    options: event.options
   }));
   try {
-    // Send the POST request with JSON data
     const response = await fetch(`${cesiumUrl}/assets`, {
       method: "POST",
       headers: {
@@ -42,31 +38,25 @@ const createNewAssetHandler = async (event: CesiumAsset) => {
         name: event.name,
         description: event.description,
         type: event.type,
-        options: {
-          sourceType: event.options.sourceType,
-          geometryCompression: event.options.geometryCompression,
-        },
+        options: event.options
       }),
     });
 
-    // Check if the response status is OK (200-299)
     if (!response.ok) {
       console.error(response);
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    // Parse the JSON response
     const responseData = await response.json();
     return responseData;
   } catch (error) {
-    console.error("Error posting JSON data:", error);
+    console.error("Error posting JSON data: ", error);
     throw error;
   }
 };
 
 const notifyUploadCompleteHandler = async (event: CesiumAsset) => {
   try {
-    // Send the POST request with JSON data
     const response = await fetch(
       `${cesiumUrl}/assets/${event.id}/uploadComplete`,
       {
@@ -82,7 +72,7 @@ const notifyUploadCompleteHandler = async (event: CesiumAsset) => {
 
     return response;
   } catch (error) {
-    console.error("Error posting JSON data:", error);
+    console.error("Error posting JSON data: ", error);
     throw error;
   }
 };
@@ -100,11 +90,10 @@ const getStatusHandler = async (event: CesiumAsset) => {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    // Parse the JSON response
     const responseData = await response.json();
     return responseData;
   } catch (error) {
-    console.error("Error posting JSON data:", error);
+    console.error("Error posting JSON data: ", error);
     throw error;
   }
 };
@@ -124,16 +113,14 @@ const createArchiveHandler = async (event: CesiumAsset) => {
       }),
     });
 
-    // Check if the response status is OK (200-299)
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    // Parse the JSON response
     const responseData = await response.json();
     return responseData;
   } catch (error) {
-    console.error("Error posting JSON data:", error);
+    console.error("Error posting JSON data: ", error);
     throw error;
   }
 };
@@ -193,20 +180,21 @@ const create3DTiles = async (
   inputDir: string,
   downloadFile: string
 ) => {
-  const createNewAssetResult = await createNewAssetHandler({
+  const createNewAssetResult: any = await createNewAssetHandler({
     name: name,
     description: description,
     type: "3DTILES",
     options: { sourceType: "3D_MODEL", geometryCompression: "NONE" },
   });
-  console.log(createNewAssetResult);
 
   const AWS_ACCESS_KEY_ID = createNewAssetResult.uploadLocation.accessKey;
   const AWS_SECRET_ACCESS_KEY =
     createNewAssetResult.uploadLocation.secretAccessKey;
   const SESSION_TOKEN = createNewAssetResult.uploadLocation.sessionToken;
-  const AWS_REGION = "us-east-1"; // e.g., "us-east-1"
+  const AWS_REGION = "us-east-1";
   const BUCKET_NAME = createNewAssetResult.uploadLocation.bucket;
+
+  console.log(AWS_SECRET_ACCESS_KEY);
 
   // Create an S3 client
   const s3Client = new S3Client({
@@ -216,29 +204,33 @@ const create3DTiles = async (
       secretAccessKey: AWS_SECRET_ACCESS_KEY,
       sessionToken: SESSION_TOKEN,
     },
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: 10000,
+      requestTimeout: 10000,
+    })
   });
 
-  //const fileStream = createReadStream("/Users/gbiegel/Downloads/test.zip");
   const dir = inputDir;
   const files = readdirSync(dir);
 
   for (const file of files) {
+    console.log(file);
     try {
       const filePath = path.join(dir, file);
 
       // Ensure the path is a file (not a directory)
       if (statSync(filePath).isFile()) {
+        console.log(filePath);
         const fileStream = createReadStream(filePath);
-
-        // Create the S3 PutObjectCommand
         const uploadParams = {
           Bucket: BUCKET_NAME,
           Key: `sources/${createNewAssetResult.assetMetadata.id}/${file}`, // The name of the file (or path in the bucket)
           Body: fileStream,
         };
-        // Send the upload request
         const command = new PutObjectCommand(uploadParams);
+        console.log(command);
         const fileUploadResult = await s3Client.send(command);
+
       }
     } catch (e) {
       console.error(e);
@@ -250,10 +242,11 @@ const create3DTiles = async (
   });
   console.log(notifyUploadCompleteResult);
 
-  let statusResult = await getStatusHandler({
+  let statusResult: any = await getStatusHandler({
     id: createNewAssetResult.assetMetadata.id,
   });
   console.log(statusResult);
+
   while (statusResult.status != "COMPLETE") {
     statusResult = await getStatusHandler({
       id: createNewAssetResult.assetMetadata.id,
@@ -261,21 +254,16 @@ const create3DTiles = async (
     console.log(statusResult);
   }
 
-  let createArchiveResult = await createArchiveHandler({
+  let createArchiveResult: any = await createArchiveHandler({
     id: createNewAssetResult.assetMetadata.id,
   });
   console.log(createArchiveResult);
-  // while (createArchiveResult.status != "COMPLETE") {
-  //   createArchiveResult = await createArchiveHandler({
-  //     id: createNewAssetResult.assetMetadata.id,
-  //   });
-  //   console.log(createArchiveResult);
-  // }
 
-  let archiveStatusResult = await getArchiveStatusHandler({
+  let archiveStatusResult: any = await getArchiveStatusHandler({
     archiveId: createArchiveResult.id,
   });
   console.log(archiveStatusResult);
+
   while (archiveStatusResult.status != "COMPLETE") {
     archiveStatusResult = await getArchiveStatusHandler({
       archiveId: createArchiveResult.id,
@@ -290,9 +278,13 @@ const create3DTiles = async (
   console.log(downloadResult);
 };
 
+const args = process.argv.slice(2);
+
+console.log(args);
+
 create3DTiles(
-  "Test",
-  "Test",
-  "/tmp",
-  "/tmp/output.zip"
+  args[0],
+  args[1],
+  args[2],
+  args[3]
 );
